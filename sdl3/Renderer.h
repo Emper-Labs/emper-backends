@@ -31,7 +31,7 @@ public:
     int windowHeight() const;
 
     // Seconds elapsed since the previous frameDeltaSeconds() call.
-    float frameDeltaSeconds();
+    float frameDeltaSeconds() override;
 
     void beginFrame() override;
     void drawPoint(f32 x, f32 y, u32 color = 0x3399FFFF) override;
