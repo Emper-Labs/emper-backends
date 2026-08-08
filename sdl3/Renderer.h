@@ -1,8 +1,7 @@
 #ifndef EMPER_BACKEND_SDL3_RENDERER
 #define EMPER_BACKEND_SDL3_RENDERER
-#include <emper/interfaces/backend/IRenderer.h>
 
-#include "Renderer.h"
+#include <emper/interfaces/backend/IRenderer.h>
 
 #include <cstdint>
 
@@ -35,10 +34,11 @@ public:
     float frameDeltaSeconds();
 
     void beginFrame() override;
-    void drawPoint(float x, float y) override;
-    void drawLine(float x1, float y1,
-                  float x2, float y2) override;
-    void drawCircle(float x, float y, float r) override;
+    void drawPoint(f32 x, f32 y, u32 color = 0x3399FFFF) override;
+    void drawLine(f32 x1, f32 y1,
+                  f32 x2, f32 y2, u32 color = 0x3399FFFF) override;
+    void drawCircle(f32 x, f32 y, f32 radius,
+                    u32 color = 0x3399FFFF) override;
     void endFrame() override;
 
 private:
@@ -47,6 +47,6 @@ private:
     std::uint64_t _lastTicks = 0;
 };
 
-}
+} // namespace emper::backend
 
-#endif//EMPER_BACKEND_SDL3_RENDERER
+#endif // EMPER_BACKEND_SDL3_RENDERER

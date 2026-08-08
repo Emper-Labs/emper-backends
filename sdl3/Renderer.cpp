@@ -1,8 +1,20 @@
-#include <emper/interfaces/backend/IRenderer.h>
+#include "Renderer.h"
 
 #include <SDL3/SDL.h>
 
-#include "Renderer.h"
+namespace {
+
+void setDrawColor(SDL_Renderer* renderer, emper::u32 color)
+{
+    const auto red = static_cast<emper::u8>((color >> 24) & 0xFFu);
+    const auto green = static_cast<emper::u8>((color >> 16) & 0xFFu);
+    const auto blue = static_cast<emper::u8>((color >> 8) & 0xFFu);
+    const auto alpha = static_cast<emper::u8>(color & 0xFFu);
+
+    SDL_SetRenderDrawColor(renderer, red, green, blue, alpha);
+}
+
+} // namespace
 
 namespace emper::backend {
 
@@ -109,49 +121,53 @@ void SDL3Renderer::beginFrame()
     }
     SDL_SetRenderDrawColor(_renderer, 15, 15, 20, 255);
     SDL_RenderClear(_renderer);
-    // Default draw colour for the primitives issued between begin/end.
-    SDL_SetRenderDrawColor(_renderer, 220, 240, 255, 255);
 }
 
-void SDL3Renderer::drawPoint(float x, float y)
+void SDL3Renderer::drawPoint(float x, float y, u32 color)
 {
     if (!_renderer)
     {
         return;
     }
+
+    setDrawColor(_renderer, color);
     SDL_RenderPoint(_renderer, x, y);
 }
 
 void SDL3Renderer::drawLine(float x1, float y1,
-                            float x2, float y2)
+                            float x2, float y2, u32 color)
 {
     if (!_renderer)
     {
         return;
     }
+
+    setDrawColor(_renderer, color);
     SDL_RenderLine(_renderer, x1, y1, x2, y2);
 }
 
-void SDL3Renderer::drawCircle(float x, float y, float r)
+void SDL3Renderer::drawCircle(float x, float y, float radius, u32 color)
 {
     // SDL3 (3.4.x) does not provide a native circle primitive, so we
     // approximate the circle with a closed polygon of line segments.
-    if (!_renderer || r <= 0.0f)
+    if (!_renderer || radius <= 0.0f)
     {
         return;
     }
 
+    setDrawColor(_renderer, color);
+
     constexpr int Segments = 32;
     constexpr float TwoPi = 6.28318530717958647692f;
 
-    float prevX = x + r;
+    float prevX = x + radius;
     float prevY = y;
 
     for (int i = 1; i <= Segments; ++i)
     {
         const float angle = TwoPi * static_cast<float>(i) / static_cast<float>(Segments);
-        const float currX = x + r * SDL_cosf(angle);
-        const float currY = y + r * SDL_sinf(angle);
+        const float currX = x + radius * SDL_cosf(angle);
+        const float currY = y + radius * SDL_sinf(angle);
 
         SDL_RenderLine(_renderer, prevX, prevY, currX, currY);
 
@@ -169,4 +185,4 @@ void SDL3Renderer::endFrame()
     SDL_RenderPresent(_renderer);
 }
 
-}
+} // namespace emper::backend
