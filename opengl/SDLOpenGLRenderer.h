@@ -11,7 +11,7 @@ namespace emper::backend
 {
 
 class SDLOpenGLRenderer final
-    : public emper::interfaces::backend::IRendererShaderPipeLine, public interfaces::backend::IRenderer {
+    : public emper::interfaces::backend::IRendererShaderPipeline, public interfaces::backend::IRenderer {
 public:
     SDLOpenGLRenderer(const char* title, int width, int height);
     ~SDLOpenGLRenderer() override;
