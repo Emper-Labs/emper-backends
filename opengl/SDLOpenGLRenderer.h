@@ -3,7 +3,9 @@
 #include <glad/gl.h>
 #include <emper/interfaces/backend/IRenderer.h>
 #include <cstdint>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 struct SDL_Window;
 
@@ -29,6 +31,14 @@ public:
                   u32 color = 0x3399FFFF) override;
     void drawCircle(f32 x, f32 y, f32 radius,
                     u32 color = 0x3399FFFF) override;
+
+    void drawText(
+        std::string_view text,
+        f32 x,
+        f32 y,
+        f32 size
+    ) override;
+
     void endFrame() override;
     int windowWidth() const override { return m_width; }
     int windowHeight() const override { return m_height; }
@@ -57,6 +67,30 @@ public:
 
 private:
     void releasePlatformResources() noexcept;
+
+    // Batched immediate-mode point rendering used by the generic
+    // IRenderer::drawPoint API (the CPU flock path).
+    void ensurePointResources();
+    void flushPointBatch();
+
+    static const char* pointVertexSource();
+    static const char* pointFragmentSource();
+
+    GLuint m_pointProgram = 0;
+    GLuint m_pointVAO = 0;
+    GLuint m_pointVBO = 0;
+    std::vector<float> m_pointBatch;
+
+    // Text rendering (bitmap-font via SDL debug-text atlas + textured quads).
+    void ensureTextResources();
+
+    static const char* textVertexSource();
+    static const char* textFragmentSource();
+
+    GLuint m_textProgram = 0;
+    GLuint m_textVAO = 0;
+    GLuint m_textVBO = 0;
+    GLuint m_fontTexture = 0;
 
     static std::string readFile(
         const std::string& path

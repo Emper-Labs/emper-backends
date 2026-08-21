@@ -149,7 +149,7 @@ void SDL3Renderer::drawLine(float x1, float y1,
 void SDL3Renderer::drawCircle(float x, float y, float radius, u32 color)
 {
     // SDL3 (3.4.x) does not provide a native circle primitive, so we
-    // approximate the circle with a closed polygon of line segments.
+    // approximate stupid circle with a closed polygon of line segments. ;)
     if (!_renderer || radius <= 0.0f)
     {
         return;
@@ -174,6 +174,34 @@ void SDL3Renderer::drawCircle(float x, float y, float radius, u32 color)
         prevX = currX;
         prevY = currY;
     }
+}
+
+void SDL3Renderer::drawText(std::string_view text, f32 x, f32 y, f32 size)
+{
+    if (!_renderer)
+    {
+        return;
+    }
+
+    // SDL_RenderDebugText renders at a fixed 8x8 character cell. Use the
+    // renderer scale to enlarge (or shrink) the text to match the requested
+    // size. The default font size is 1.0 (8 px per character).
+    float prevScaleX = 1.0f;
+    float prevScaleY = 1.0f;
+    SDL_GetRenderScale(
+        _renderer,
+        &prevScaleX,
+        &prevScaleY
+    );
+    SDL_SetRenderScale(_renderer, size, size);
+
+    // setDrawColor is not used by debug text, but keep it consistent with
+    // the rest of the renderer's state.
+    setDrawColor(_renderer, 0xFFFFFFFFu);
+    SDL_RenderDebugText(_renderer, x, y, std::string(text).c_str());
+
+    // Restore the previous scale so other draw calls are unaffected.
+    SDL_SetRenderScale(_renderer, prevScaleX, prevScaleY);
 }
 
 void SDL3Renderer::endFrame()

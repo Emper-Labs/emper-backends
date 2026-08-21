@@ -64,6 +64,7 @@ SDLOpenGLRenderer::SDLOpenGLRenderer(const char* title, int width, int height)
         return;
     }
 
+
     SDL_GLContext context = SDL_GL_CreateContext(m_window);
     m_context = context;
 
@@ -149,6 +150,28 @@ SDLOpenGLRenderer::~SDLOpenGLRenderer()
 
     m_programs.clear();
     m_vao = 0;
+
+    if (m_textProgram)
+    {
+        glDeleteProgram(m_textProgram);
+        m_textProgram = 0;
+    }
+    if (m_textVAO)
+    {
+        glDeleteVertexArrays(1, &m_textVAO);
+        m_textVAO = 0;
+    }
+    if (m_textVBO)
+    {
+        glDeleteBuffers(1, &m_textVBO);
+        m_textVBO = 0;
+    }
+    if (m_fontTexture)
+    {
+        glDeleteTextures(1, &m_fontTexture);
+        m_fontTexture = 0;
+    }
+
     releasePlatformResources();
 }
 
@@ -225,18 +248,27 @@ void SDLOpenGLRenderer::beginFrame()
     if (!m_valid)
         return;
 
+    m_pointBatch.clear();
+
     glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 }
 
 void SDLOpenGLRenderer::drawPoint(f32 x, f32 y, u32 color)
 {
-    // The OpenGL backend currently renders sample geometry through the
-    // explicit graphics pipeline API below. Generic debug primitives are
-    // intentionally left unsupported until that pipeline is generalized.
-    static_cast<void>(x);
-    static_cast<void>(y);
-    static_cast<void>(color);
+    if (!m_valid || m_width <= 0 || m_height <= 0)
+        return;
+
+    ensurePointResources();
+
+    // Batch in immediate-mode. Each point is 6 floats:
+    //   normalizedX, normalizedY, r, g, b, a
+    m_pointBatch.push_back(x * 2.0f / m_width - 1.0f);
+    m_pointBatch.push_back(y * 2.0f / m_height - 1.0f);
+    m_pointBatch.push_back(((color >> 24) & 0xFF) / 255.0f);
+    m_pointBatch.push_back(((color >> 16) & 0xFF) / 255.0f);
+    m_pointBatch.push_back(((color >>  8) & 0xFF) / 255.0f);
+    m_pointBatch.push_back(((color >>  0) & 0xFF) / 255.0f);
 }
 
 void SDLOpenGLRenderer::drawLine(
@@ -258,10 +290,434 @@ void SDLOpenGLRenderer::drawCircle(
     static_cast<void>(color);
 }
 
+void SDLOpenGLRenderer::drawText(
+    std::string_view text,
+    f32 x,
+    f32 y,
+    f32 size)
+{
+    ensureTextResources();
+
+    if (!m_textProgram || !m_fontTexture)
+        return;
+
+    if (m_width <= 0 || m_height <= 0)
+        return;
+
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glUseProgram(m_textProgram);
+
+    glUniform1i(
+        glGetUniformLocation(m_textProgram, "fontTexture"),
+        0);
+
+    glUniform4f(
+        glGetUniformLocation(m_textProgram, "textColor"),
+        1.0f,
+        1.0f,
+        1.0f,
+        1.0f);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_fontTexture);
+
+    glBindVertexArray(m_textVAO);
+
+    constexpr int FontSize = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
+    constexpr int CharCount = 96;
+
+    const float scale =
+        size / static_cast<f32>(FontSize);
+
+    const float charW =
+        FontSize * scale * 2.0f /
+        static_cast<f32>(m_width);
+
+    const float charH =
+        FontSize * scale * 2.0f /
+        static_cast<f32>(m_height);
+
+    // SDL-style coordinates:
+    // (0, 0) = top-left.
+    float cursorX =
+        x * 2.0f /
+        static_cast<f32>(m_width) - 1.0f;
+
+    float cursorY =
+        1.0f -
+        y * 2.0f /
+        static_cast<f32>(m_height);
+
+    for (char c : text)
+    {
+        const int idx =
+            static_cast<int>(
+                static_cast<unsigned char>(c)) - 32;
+
+        const int glyphIndex =
+            (idx >= 0 && idx < CharCount)
+                ? idx
+                : 0;
+
+        const float u0 =
+            static_cast<float>(glyphIndex) /
+            static_cast<float>(CharCount);
+
+        const float u1 =
+            static_cast<float>(glyphIndex + 1) /
+            static_cast<float>(CharCount);
+        
+        //Chỗ này không để ý text ngược mãi mới sửa được 
+        constexpr float vTop = 0.0f;
+        constexpr float vBottom = 1.0f;
+
+        const float y0 = cursorY;
+        const float y1 = cursorY - charH;
+
+        const float vertices[6][4] = {
+            // position                  // UV
+            {cursorX,          y0,        u0, vTop},
+            {cursorX + charW,  y0,        u1, vTop},
+            {cursorX + charW,  y1,        u1, vBottom},
+
+            {cursorX,          y0,        u0, vTop},
+            {cursorX + charW,  y1,        u1, vBottom},
+            {cursorX,          y1,        u0, vBottom},
+        };
+
+        glBindBuffer(GL_ARRAY_BUFFER, m_textVBO);
+
+        glBufferSubData(
+            GL_ARRAY_BUFFER,
+            0,
+            sizeof(vertices),
+            vertices);
+
+        glDrawArrays(
+            GL_TRIANGLES,
+            0,
+            6);
+
+        cursorX += charW;
+    }
+
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    glDisable(GL_BLEND);
+}
+
 void SDLOpenGLRenderer::endFrame()
 {
-    if (m_valid)
-        SDL_GL_SwapWindow(m_window);
+    if (!m_valid)
+        return;
+
+    if (!m_pointBatch.empty())
+        flushPointBatch();
+
+    SDL_GL_SwapWindow(m_window);
+}
+
+const char* SDLOpenGLRenderer::pointVertexSource()
+{
+    return R"GLSL(
+        #version 430 core
+        layout(location = 0) in vec2 position;
+        layout(location = 1) in vec4 color;
+        layout(location = 0) out vec4 vertexColor;
+        void main()
+        {
+            gl_Position = vec4(position, 0.0, 1.0);
+            gl_PointSize = 1.0;
+            vertexColor = color;
+        }
+    )GLSL";
+}
+
+const char* SDLOpenGLRenderer::pointFragmentSource()
+{
+    return R"GLSL(
+        #version 430 core
+        layout(location = 0) out vec4 fragColor;
+        layout(location = 0) in vec4 vertexColor;
+        void main()
+        {
+            fragColor = vertexColor;
+        }
+    )GLSL";
+}
+
+void SDLOpenGLRenderer::ensurePointResources()
+{
+    if (m_pointProgram)
+        return;
+
+    auto compile = [this](GLenum type, const char* source)
+    {
+        return compileShader(type, source);
+    };
+
+    GLuint vs = compile(GL_VERTEX_SHADER, pointVertexSource());
+    if (!vs)
+        return;
+
+    GLuint fs = compile(GL_FRAGMENT_SHADER, pointFragmentSource());
+    if (!fs)
+    {
+        glDeleteShader(vs);
+        return;
+    }
+
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vs);
+    glAttachShader(program, fs);
+    glLinkProgram(program);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    GLint success = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success)
+    {
+        glDeleteProgram(program);
+        return;
+    }
+
+    m_pointProgram = program;
+
+    glGenVertexArrays(1, &m_pointVAO);
+    glGenBuffers(1, &m_pointVBO);
+
+    glBindVertexArray(m_pointVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, m_pointVBO);
+
+    // Two attributes in one interleaved vertex:
+    //   floats 0-1: position
+    //   floats 2-5: color (RGBA)
+    constexpr GLsizei stride = 6 * sizeof(GLfloat);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(
+        0, 2, GL_FLOAT, GL_FALSE,
+        stride, reinterpret_cast<const void*>(0));
+
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(
+        1, 4, GL_FLOAT, GL_FALSE,
+        stride, reinterpret_cast<const void*>(2 * sizeof(GLfloat)));
+
+    glBindVertexArray(0);
+}
+
+void SDLOpenGLRenderer::flushPointBatch()
+{
+    ensurePointResources();
+    if (!m_pointProgram || m_pointBatch.empty())
+        return;
+
+    const GLsizeiptr byteSize =
+        static_cast<GLsizeiptr>(
+            m_pointBatch.size() * sizeof(float));
+
+    glUseProgram(m_pointProgram);
+    glBindVertexArray(m_pointVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, m_pointVBO);
+    glBufferData(
+        GL_ARRAY_BUFFER,
+        byteSize,
+        m_pointBatch.data(),
+        GL_STREAM_DRAW);
+    glDrawArrays(
+        GL_POINTS,
+        0,
+        static_cast<GLsizei>(m_pointBatch.size() / 6));
+
+    glBindVertexArray(0);
+    glUseProgram(0);
+}
+
+const char* SDLOpenGLRenderer::textVertexSource()
+{
+    return R"GLSL(
+        #version 430 core
+        layout(location = 0) in vec2 position;
+        layout(location = 1) in vec2 texCoord;
+        layout(location = 0) out vec2 fragTexCoord;
+        void main()
+        {
+            gl_Position = vec4(position, 0.0, 1.0);
+            fragTexCoord = texCoord;
+        }
+    )GLSL";
+}
+
+const char* SDLOpenGLRenderer::textFragmentSource()
+{
+    return R"GLSL(
+        #version 430 core
+
+        layout(location = 0) in vec2 fragTexCoord;
+        layout(location = 0) out vec4 fragColor;
+
+        uniform sampler2D fontTexture;
+        uniform vec4 textColor;
+
+        void main()
+        {
+            float alpha = texture(fontTexture, fragTexCoord).a;
+            fragColor = vec4(textColor.rgb, textColor.a * alpha);
+        }
+    )GLSL";
+}
+
+void SDLOpenGLRenderer::ensureTextResources()
+{
+    if (m_textProgram)
+        return;
+
+    if (!m_glLoaded)
+        return;
+
+    constexpr int FontSize = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
+    constexpr int CharCount = 96; // ASCII 32..127
+    // Use a taller atlas so glyphs are not compressed vertically.
+    // SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE is 8, so atlasHeight = 8.
+    const int atlasWidth  = FontSize * CharCount;
+    const int atlasHeight = FontSize;
+
+    // ------------------------------------------------------------
+    // Build a font atlas using SDL's built-in 8x8 debug font.
+    // Render each printable ASCII glyph onto an SDL surface via a
+    // software renderer, then upload the result as a GL texture.
+    // ------------------------------------------------------------
+    SDL_Surface* surface = SDL_CreateSurface(
+        atlasWidth, atlasHeight, SDL_PIXELFORMAT_RGBA32);
+    if (!surface)
+        return;
+
+    SDL_Renderer* swRenderer = SDL_CreateSoftwareRenderer(surface);
+    if (!swRenderer)
+    {
+        SDL_DestroySurface(surface);
+        return;
+    }
+
+    // Clear to fully transparent.
+    SDL_SetRenderDrawColor(swRenderer, 0, 0, 0, 0);
+    SDL_RenderClear(swRenderer);
+
+    // Render white glyphs (alpha channel will be used by the text shader).
+    SDL_SetRenderDrawColor(swRenderer, 255, 255, 255, 255);
+    for (int i = 0; i < CharCount; ++i)
+    {
+        char glyph[2] = {
+            static_cast<char>(' ' + i),
+            '\0'
+        };
+
+        SDL_RenderDebugText(
+            swRenderer,
+            static_cast<float>(i * FontSize),
+            0.0f,
+            glyph);
+    }
+    SDL_RenderPresent(swRenderer);//<- quên cái này thì không thấy text đâu ;)
+
+    // --- NEW: scale the atlas surface up so glyphs aren't tiny ---
+    const int scaledWidth = atlasWidth * 4;
+    const int scaledHeight = atlasHeight * 4;
+    SDL_Surface* scaledSurface = SDL_ScaleSurface(
+        surface,
+        scaledWidth,
+        scaledHeight,
+        SDL_SCALEMODE_NEAREST
+    );
+    if (!scaledSurface)
+    {
+        // Fallback: keep original surface if scaling fails.
+    }
+    else
+    {
+        SDL_DestroySurface(surface);
+        surface = scaledSurface;
+    }
+
+    glGenTextures(1, &m_fontTexture);
+    glBindTexture(GL_TEXTURE_2D, m_fontTexture);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    const int uploadWidth = (scaledSurface) ? scaledWidth : atlasWidth;
+    const int uploadHeight = (scaledSurface) ? scaledHeight : atlasHeight;
+
+    glTexImage2D(
+        GL_TEXTURE_2D, 0, GL_RGBA,
+        uploadWidth, uploadHeight, 0,
+        GL_RGBA, GL_UNSIGNED_BYTE,
+        surface->pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    SDL_DestroyRenderer(swRenderer);
+    SDL_DestroySurface(surface);
+
+    // ------------------------------------------------------------
+    // Compile the text shader.
+    // ------------------------------------------------------------
+    GLuint vs = compileShader(GL_VERTEX_SHADER, textVertexSource());
+    if (!vs)
+        return;
+
+    GLuint fs = compileShader(GL_FRAGMENT_SHADER, textFragmentSource());
+    if (!fs)
+    {
+        glDeleteShader(vs);
+        return;
+    }
+
+    m_textProgram = glCreateProgram();
+    glAttachShader(m_textProgram, vs);
+    glAttachShader(m_textProgram, fs);
+    glLinkProgram(m_textProgram);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    GLint success = GL_FALSE;
+    glGetProgramiv(m_textProgram, GL_LINK_STATUS, &success);
+    if (!success)
+    {
+        glDeleteProgram(m_textProgram);
+        m_textProgram = 0;
+        return;
+    }
+
+    // Quad VAO/VBO (filled per-character in drawText).
+    glGenVertexArrays(1, &m_textVAO);
+    glGenBuffers(1, &m_textVBO);
+    glBindVertexArray(m_textVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, m_textVBO);
+    glBufferData(
+        GL_ARRAY_BUFFER,
+        sizeof(float) * 4 * 6,
+        nullptr,
+        GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(
+        0, 2, GL_FLOAT, GL_FALSE,
+        4 * sizeof(float),
+        reinterpret_cast<const void*>(0));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(
+        1, 2, GL_FLOAT, GL_FALSE,
+        4 * sizeof(float),
+        reinterpret_cast<const void*>(2 * sizeof(float)));
+    glBindVertexArray(0);
 }
 
 ProgramHandle SDLOpenGLRenderer::createGraphicsProgram(
