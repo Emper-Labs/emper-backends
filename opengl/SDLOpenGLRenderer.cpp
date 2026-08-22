@@ -294,7 +294,9 @@ void SDLOpenGLRenderer::drawText(
     std::string_view text,
     f32 x,
     f32 y,
-    f32 size)
+    f32 size,
+    u32 color
+)
 {
     ensureTextResources();
 
@@ -316,12 +318,15 @@ void SDLOpenGLRenderer::drawText(
         glGetUniformLocation(m_textProgram, "fontTexture"),
         0);
 
+    const float r = ((color >> 24) & 0xFF) / 255.0f;
+    const float g = ((color >> 16) & 0xFF) / 255.0f;
+    const float b = ((color >> 8)  & 0xFF) / 255.0f;
+    const float a = ( color        & 0xFF) / 255.0f;
+
     glUniform4f(
         glGetUniformLocation(m_textProgram, "textColor"),
-        1.0f,
-        1.0f,
-        1.0f,
-        1.0f);
+        r, g, b, a
+    );
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_fontTexture);
@@ -422,6 +427,231 @@ void SDLOpenGLRenderer::endFrame()
         flushPointBatch();
 
     SDL_GL_SwapWindow(m_window);
+}
+
+const char* SDLOpenGLRenderer::rectVertexSource()
+{
+    return R"GLSL(
+        #version 430 core
+
+        layout(location = 0) in vec2 position;
+        layout(location = 1) in vec4 color;
+
+        layout(location = 0) out vec4 vertexColor;
+
+        void main()
+        {
+            gl_Position = vec4(position, 0.0, 1.0);
+            vertexColor = color;
+        }
+    )GLSL";
+}
+const char* SDLOpenGLRenderer::rectFragmentSource()
+{
+    return R"GLSL(
+        #version 430 core
+
+        layout(location = 0) in vec4 vertexColor;
+        layout(location = 0) out vec4 fragColor;
+
+        void main()
+        {
+            fragColor = vertexColor;
+        }
+    )GLSL";
+}
+void SDLOpenGLRenderer::ensureRectResources()
+{
+    if (m_rectProgram)
+        return;
+
+    const GLuint vs =
+        compileShader(
+            GL_VERTEX_SHADER,
+            rectVertexSource()
+        );
+
+    if (!vs)
+        return;
+
+    const GLuint fs =
+        compileShader(
+            GL_FRAGMENT_SHADER,
+            rectFragmentSource()
+        );
+
+    if (!fs)
+    {
+        glDeleteShader(vs);
+        return;
+    }
+
+    const GLuint program =
+        glCreateProgram();
+
+    glAttachShader(program, vs);
+    glAttachShader(program, fs);
+    glLinkProgram(program);
+
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    GLint success = GL_FALSE;
+
+    glGetProgramiv(
+        program,
+        GL_LINK_STATUS,
+        &success
+    );
+
+    if (!success)
+    {
+        glDeleteProgram(program);
+        return;
+    }
+
+    m_rectProgram = program;
+
+    glGenVertexArrays(
+        1,
+        &m_rectVAO
+    );
+
+    glGenBuffers(
+        1,
+        &m_rectVBO
+    );
+
+    glBindVertexArray(m_rectVAO);
+    glBindBuffer(
+        GL_ARRAY_BUFFER,
+        m_rectVBO
+    );
+
+    constexpr GLsizei stride =
+        6 * sizeof(GLfloat);
+
+    glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(
+        0,
+        2,
+        GL_FLOAT,
+        GL_FALSE,
+        stride,
+        reinterpret_cast<const void*>(0)
+    );
+
+    glEnableVertexAttribArray(1);
+
+    glVertexAttribPointer(
+        1,
+        4,
+        GL_FLOAT,
+        GL_FALSE,
+        stride,
+        reinterpret_cast<const void*>(
+            2 * sizeof(GLfloat)
+        )
+    );
+
+    glBindVertexArray(0);
+}
+
+void SDLOpenGLRenderer::drawRect(
+    f32 x,
+    f32 y,
+    f32 width,
+    f32 height,
+    u32 color
+)
+{
+    ensureRectResources();
+
+    if (!m_rectProgram)
+        return;
+
+    if (m_width <= 0 || m_height <= 0)
+        return;
+
+    const float r =
+        static_cast<float>((color >> 24) & 0xFF) / 255.0f;
+
+    const float g =
+        static_cast<float>((color >> 16) & 0xFF) / 255.0f;
+
+    const float b =
+        static_cast<float>((color >> 8) & 0xFF) / 255.0f;
+
+    const float a =
+        static_cast<float>(color & 0xFF) / 255.0f;
+
+    const float x0 =
+        x * 2.0f /
+        static_cast<float>(m_width) - 1.0f;
+
+    const float y0 =
+        1.0f -
+        y * 2.0f /
+        static_cast<float>(m_height);
+
+    const float x1 =
+        (x + width) * 2.0f /
+        static_cast<float>(m_width) - 1.0f;
+
+    const float y1 =
+        1.0f -
+        (y + height) * 2.0f /
+        static_cast<float>(m_height);
+
+    const GLfloat vertices[] = {
+
+        // position       color
+
+        x0, y0,            r, g, b, a,
+        x1, y0,            r, g, b, a,
+        x1, y1,            r, g, b, a,
+
+        x0, y0,            r, g, b, a,
+        x1, y1,            r, g, b, a,
+        x0, y1,            r, g, b, a
+    };
+
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(
+        GL_SRC_ALPHA,
+        GL_ONE_MINUS_SRC_ALPHA
+    );
+
+    glUseProgram(m_rectProgram);
+
+    glBindVertexArray(m_rectVAO);
+
+    glBindBuffer(
+        GL_ARRAY_BUFFER,
+        m_rectVBO
+    );
+
+    glBufferData(
+        GL_ARRAY_BUFFER,
+        sizeof(vertices),
+        vertices,
+        GL_DYNAMIC_DRAW
+    );
+
+    glDrawArrays(
+        GL_TRIANGLES,
+        0,
+        6
+    );
+
+    glBindVertexArray(0);
+    glUseProgram(0);
+
+    glDisable(GL_BLEND);
 }
 
 const char* SDLOpenGLRenderer::pointVertexSource()

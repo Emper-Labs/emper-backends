@@ -33,11 +33,21 @@ public:
                     u32 color = 0x3399FFFF) override;
 
     void drawText(
-        std::string_view text,
+    std::string_view text,
+    f32 x,
+    f32 y,
+    f32 size,
+    u32 color = 0xFFFFFFFF
+    ) override;
+
+    void drawRect(
         f32 x,
         f32 y,
-        f32 size
+        f32 width,
+        f32 height,
+        u32 color = 0xFFFFFFFF
     ) override;
+
 
     void endFrame() override;
     int windowWidth() const override { return m_width; }
@@ -91,6 +101,15 @@ private:
     GLuint m_textVAO = 0;
     GLuint m_textVBO = 0;
     GLuint m_fontTexture = 0;
+
+    GLuint m_rectProgram = 0;
+    GLuint m_rectVAO = 0;
+    GLuint m_rectVBO = 0;
+
+    void ensureRectResources();
+
+    static const char* rectVertexSource();
+    static const char* rectFragmentSource();
 
     static std::string readFile(
         const std::string& path

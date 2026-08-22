@@ -176,7 +176,7 @@ void SDL3Renderer::drawCircle(float x, float y, float radius, u32 color)
     }
 }
 
-void SDL3Renderer::drawText(std::string_view text, f32 x, f32 y, f32 size)
+void SDL3Renderer::drawText(std::string_view text, f32 x, f32 y, f32 size,u32 color)
 {
     if (!_renderer)
     {
@@ -197,11 +197,52 @@ void SDL3Renderer::drawText(std::string_view text, f32 x, f32 y, f32 size)
 
     // setDrawColor is not used by debug text, but keep it consistent with
     // the rest of the renderer's state.
-    setDrawColor(_renderer, 0xFFFFFFFFu);
+    setDrawColor(_renderer, color);
     SDL_RenderDebugText(_renderer, x, y, std::string(text).c_str());
 
     // Restore the previous scale so other draw calls are unaffected.
     SDL_SetRenderScale(_renderer, prevScaleX, prevScaleY);
+}
+
+void SDL3Renderer::drawRect(
+    f32 x,
+    f32 y,
+    f32 width,
+    f32 height,
+    u32 color
+)
+{
+    const Uint8 r =
+        static_cast<Uint8>((color >> 24) & 0xFF);
+
+    const Uint8 g =
+        static_cast<Uint8>((color >> 16) & 0xFF);
+
+    const Uint8 b =
+        static_cast<Uint8>((color >> 8) & 0xFF);
+
+    const Uint8 a =
+        static_cast<Uint8>(color & 0xFF);
+
+    SDL_FRect rect{
+        x,
+        y,
+        width,
+        height
+    };
+
+    SDL_SetRenderDrawColor(
+        _renderer,
+        r,
+        g,
+        b,
+        a
+    );
+
+    SDL_RenderFillRect(
+        _renderer,
+        &rect
+    );
 }
 
 void SDL3Renderer::endFrame()

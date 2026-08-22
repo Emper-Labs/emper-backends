@@ -39,14 +39,22 @@ public:
                   f32 x2, f32 y2, u32 color = 0x3399FFFF) override;
     void drawCircle(f32 x, f32 y, f32 radius,
                     u32 color = 0x3399FFFF) override;
-
     void drawText(
-        std::string_view text,
-        f32 x,
-        f32 y,
-        f32 size
+    std::string_view text,
+    f32 x,
+    f32 y,
+    f32 size,
+    u32 color = 0xFFFFFFFF
     ) override;
 
+    void drawRect(
+        f32 x,
+        f32 y,
+        f32 width,
+        f32 height,
+        u32 color = 0xFFFFFFFF
+    ) override;
+    
     void endFrame() override;
 
 private:
